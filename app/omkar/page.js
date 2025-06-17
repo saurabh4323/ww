@@ -470,13 +470,11 @@ export default function Call() {
         }}
       >
         <p>Make sure both users are on this page and have entered their IDs.</p>
-        <p>
-          You'll be prompted to allow microphone access when starting a call.
-        </p>
+        <p>Youl be prompted to allow microphone access when starting a call.</p>
         <p>
           <strong>Important:</strong> This app requires HTTPS to work properly.
-          If you're getting microphone errors, make sure you're accessing the
-          site via HTTPS.
+          If yore getting microphone errors, make sure youre accessing the site
+          via HTTPS.
         </p>
         <p>
           Current protocol:{" "}

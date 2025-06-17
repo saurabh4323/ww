@@ -407,8 +407,8 @@ export default function Login() {
                         Reset Password
                       </h3>
                       <p className="text-white/80 text-sm mb-3">
-                        Enter your Service ID and we'll send reset instructions
-                        to your registered contact details.
+                        Enter your Service ID and we well send reset
+                        instructions to your registered contact details.
                       </p>
                       <div className="flex space-x-2">
                         <button
@@ -472,7 +472,7 @@ export default function Login() {
                 {/* Footer */}
                 <div className="mt-8 pt-6 border-t border-white/20 text-center">
                   <p className="text-white/80 mb-4">
-                    Don't have an account?{" "}
+                    Don not have an account?{" "}
                     <button className="text-orange-400 hover:text-orange-300 font-semibold underline">
                       Create Account
                     </button>

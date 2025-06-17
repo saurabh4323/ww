@@ -141,7 +141,7 @@ export default function ModernArmyUpload() {
                 <path d="M12 2L13.09 8.26L22 9L17 14L18.18 22L12 19L5.82 22L7 14L2 9L10.91 8.26L12 2Z" />
               </svg>
             </div>
-            <span className="text-xl">"SERVICE BEFORE SELF"</span>
+            <span className="text-xl">SERVICE BEFORE SELF</span>
           </div>
         </div>
 
