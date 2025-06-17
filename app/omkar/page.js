@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import io from "socket.io-client";
 
 export default function Call() {
@@ -11,16 +11,14 @@ export default function Call() {
   const [SimplePeer, setSimplePeer] = useState(null);
   const peerRef = useRef(null);
   const audioRef = useRef(null);
-  const socketRef = useRef(null);
-  const targetIdRef = useRef("");
 
   // Load SimplePeer dynamically
   useEffect(() => {
     const loadSimplePeer = async () => {
       try {
-        const simplePeerModule = await import("simple-peer");
+        const peerModule = await import("simple-peer");
         // Handle both CommonJS and ES module exports
-        const PeerConstructor = simplePeerModule.default || simplePeerModule;
+        const PeerConstructor = peerModule.default || peerModule;
         setSimplePeer(() => PeerConstructor);
         console.log("SimplePeer loaded successfully");
       } catch (error) {
@@ -64,16 +62,7 @@ export default function Call() {
     }
   };
 
-  // Update refs when values change
-  useEffect(() => {
-    socketRef.current = socket;
-  }, [socket]);
-
-  useEffect(() => {
-    targetIdRef.current = targetId;
-  }, [targetId]);
-
-  const endCall = useCallback(() => {
+  const endCall = () => {
     console.log("Ending call");
 
     if (peerRef.current && typeof peerRef.current.destroy === "function") {
@@ -96,102 +85,92 @@ export default function Call() {
     setIsCalling(false);
     setCallStatus("Call ended");
 
-    if (
-      socketRef.current &&
-      socketRef.current.connected &&
-      targetIdRef.current
-    ) {
-      socketRef.current.emit("end-call", { to: targetIdRef.current });
+    if (socket && socket.connected && targetId) {
+      socket.emit("end-call", { to: targetId });
     }
-  }, []); // No dependencies needed since we use refs
+  };
 
-  const handleAcceptCall = useCallback(
-    async (offer, from, socketInstance) => {
-      if (!SimplePeer) {
-        setCallStatus("WebRTC library not loaded");
-        return;
+  const handleAcceptCall = async (offer, from, socketInstance) => {
+    if (!SimplePeer) {
+      setCallStatus("WebRTC library not loaded");
+      return;
+    }
+
+    if (!checkMediaSupport()) {
+      setCallStatus("Microphone access not supported");
+      return;
+    }
+
+    try {
+      const stream = await getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      if (audioRef.current) {
+        audioRef.current.srcObject = stream;
       }
 
-      if (!checkMediaSupport()) {
-        setCallStatus("Microphone access not supported");
-        return;
-      }
+      peerRef.current = new SimplePeer({
+        initiator: false,
+        trickle: false,
+        stream,
+        config: {
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun1.l.google.com:19302" },
+            { urls: "stun:stun2.l.google.com:19302" },
+          ],
+        },
+      });
 
-      try {
-        const stream = await getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        });
+      console.log("Peer instance created for incoming call:", peerRef.current);
 
-        if (audioRef.current) {
-          audioRef.current.srcObject = stream;
+      peerRef.current.on("signal", (data) => {
+        console.log("Signal event:", data.type);
+        if (data.type === "answer") {
+          socketInstance.emit("accept-call", { to: from, answer: data });
+        } else if (data.candidate) {
+          socketInstance.emit("ice-candidate", { to: from, candidate: data });
         }
+      });
 
-        peerRef.current = new SimplePeer({
-          initiator: false,
-          trickle: false,
-          stream,
-          config: {
-            iceServers: [
-              { urls: "stun:stun.l.google.com:19302" },
-              { urls: "stun:stun1.l.google.com:19302" },
-              { urls: "stun:stun2.l.google.com:19302" },
-            ],
-          },
-        });
+      peerRef.current.on("stream", (remoteStream) => {
+        console.log("Remote stream received");
+        if (audioRef.current) {
+          audioRef.current.srcObject = remoteStream;
+        }
+        setCallStatus("Connected");
+      });
 
-        console.log(
-          "Peer instance created for incoming call:",
-          peerRef.current
-        );
+      peerRef.current.on("connect", () => {
+        console.log("Peer connected");
+        setCallStatus("Connected");
+      });
 
-        peerRef.current.on("signal", (data) => {
-          console.log("Signal event:", data.type);
-          if (data.type === "answer") {
-            socketInstance.emit("accept-call", { to: from, answer: data });
-          } else if (data.candidate) {
-            socketInstance.emit("ice-candidate", { to: from, candidate: data });
-          }
-        });
-
-        peerRef.current.on("stream", (remoteStream) => {
-          console.log("Remote stream received");
-          if (audioRef.current) {
-            audioRef.current.srcObject = remoteStream;
-          }
-          setCallStatus("Connected");
-        });
-
-        peerRef.current.on("connect", () => {
-          console.log("Peer connected");
-          setCallStatus("Connected");
-        });
-
-        peerRef.current.on("error", (err) => {
-          console.error("Peer error:", err);
-          setCallStatus("Call failed: " + err.message);
-          endCall();
-        });
-
-        peerRef.current.on("close", () => {
-          console.log("Peer connection closed");
-          endCall();
-        });
-
-        // Signal the offer to establish connection
-        peerRef.current.signal(offer);
-        setCallStatus("Accepting call...");
-      } catch (err) {
-        console.error("Media error:", err);
-        setCallStatus("Failed to access microphone: " + err.message);
+      peerRef.current.on("error", (err) => {
+        console.error("Peer error:", err);
+        setCallStatus("Call failed: " + err.message);
         endCall();
-      }
-    },
-    [SimplePeer, endCall]
-  );
+      });
+
+      peerRef.current.on("close", () => {
+        console.log("Peer connection closed");
+        endCall();
+      });
+
+      // Signal the offer to establish connection
+      peerRef.current.signal(offer);
+      setCallStatus("Accepting call...");
+    } catch (err) {
+      console.error("Media error:", err);
+      setCallStatus("Failed to access microphone: " + err.message);
+      endCall();
+    }
+  };
 
   useEffect(() => {
     if (!userId) return;
@@ -250,7 +229,8 @@ export default function Call() {
         socketInstance.disconnect();
       }
     };
-  }, [userId, handleAcceptCall, endCall]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, SimplePeer]);
 
   const startCall = async () => {
     if (!userId || !targetId) {
