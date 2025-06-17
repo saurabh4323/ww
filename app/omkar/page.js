@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import io from "socket.io-client";
 
 export default function Call() {
@@ -11,15 +11,17 @@ export default function Call() {
   const [SimplePeer, setSimplePeer] = useState(null);
   const peerRef = useRef(null);
   const audioRef = useRef(null);
+  const socketRef = useRef(null);
+  const targetIdRef = useRef("");
 
   // Load SimplePeer dynamically
   useEffect(() => {
     const loadSimplePeer = async () => {
       try {
-        const module = await import("simple-peer");
+        const simplePeerModule = await import("simple-peer");
         // Handle both CommonJS and ES module exports
-        const Peer = module.default || module;
-        setSimplePeer(() => Peer);
+        const PeerConstructor = simplePeerModule.default || simplePeerModule;
+        setSimplePeer(() => PeerConstructor);
         console.log("SimplePeer loaded successfully");
       } catch (error) {
         console.error("Failed to load SimplePeer:", error);
@@ -29,6 +31,167 @@ export default function Call() {
 
     loadSimplePeer();
   }, []);
+
+  // Check if getUserMedia is available
+  const checkMediaSupport = () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      return false;
+    }
+    return true;
+  };
+
+  // Get user media with fallback
+  const getUserMedia = async (constraints) => {
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } else if (navigator.getUserMedia) {
+      // Fallback for older browsers
+      return new Promise((resolve, reject) => {
+        navigator.getUserMedia(constraints, resolve, reject);
+      });
+    } else if (navigator.webkitGetUserMedia) {
+      // Webkit fallback
+      return new Promise((resolve, reject) => {
+        navigator.webkitGetUserMedia(constraints, resolve, reject);
+      });
+    } else if (navigator.mozGetUserMedia) {
+      // Firefox fallback
+      return new Promise((resolve, reject) => {
+        navigator.mozGetUserMedia(constraints, resolve, reject);
+      });
+    } else {
+      throw new Error("getUserMedia is not supported in this browser");
+    }
+  };
+
+  // Update refs when values change
+  useEffect(() => {
+    socketRef.current = socket;
+  }, [socket]);
+
+  useEffect(() => {
+    targetIdRef.current = targetId;
+  }, [targetId]);
+
+  const endCall = useCallback(() => {
+    console.log("Ending call");
+
+    if (peerRef.current && typeof peerRef.current.destroy === "function") {
+      try {
+        peerRef.current.destroy();
+      } catch (err) {
+        console.error("Error destroying peer:", err);
+      }
+    }
+    peerRef.current = null;
+
+    if (audioRef.current && audioRef.current.srcObject) {
+      audioRef.current.srcObject.getTracks().forEach((track) => {
+        track.stop();
+        console.log("Stopped track:", track.kind);
+      });
+      audioRef.current.srcObject = null;
+    }
+
+    setIsCalling(false);
+    setCallStatus("Call ended");
+
+    if (
+      socketRef.current &&
+      socketRef.current.connected &&
+      targetIdRef.current
+    ) {
+      socketRef.current.emit("end-call", { to: targetIdRef.current });
+    }
+  }, []); // No dependencies needed since we use refs
+
+  const handleAcceptCall = useCallback(
+    async (offer, from, socketInstance) => {
+      if (!SimplePeer) {
+        setCallStatus("WebRTC library not loaded");
+        return;
+      }
+
+      if (!checkMediaSupport()) {
+        setCallStatus("Microphone access not supported");
+        return;
+      }
+
+      try {
+        const stream = await getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+
+        if (audioRef.current) {
+          audioRef.current.srcObject = stream;
+        }
+
+        peerRef.current = new SimplePeer({
+          initiator: false,
+          trickle: false,
+          stream,
+          config: {
+            iceServers: [
+              { urls: "stun:stun.l.google.com:19302" },
+              { urls: "stun:stun1.l.google.com:19302" },
+              { urls: "stun:stun2.l.google.com:19302" },
+            ],
+          },
+        });
+
+        console.log(
+          "Peer instance created for incoming call:",
+          peerRef.current
+        );
+
+        peerRef.current.on("signal", (data) => {
+          console.log("Signal event:", data.type);
+          if (data.type === "answer") {
+            socketInstance.emit("accept-call", { to: from, answer: data });
+          } else if (data.candidate) {
+            socketInstance.emit("ice-candidate", { to: from, candidate: data });
+          }
+        });
+
+        peerRef.current.on("stream", (remoteStream) => {
+          console.log("Remote stream received");
+          if (audioRef.current) {
+            audioRef.current.srcObject = remoteStream;
+          }
+          setCallStatus("Connected");
+        });
+
+        peerRef.current.on("connect", () => {
+          console.log("Peer connected");
+          setCallStatus("Connected");
+        });
+
+        peerRef.current.on("error", (err) => {
+          console.error("Peer error:", err);
+          setCallStatus("Call failed: " + err.message);
+          endCall();
+        });
+
+        peerRef.current.on("close", () => {
+          console.log("Peer connection closed");
+          endCall();
+        });
+
+        // Signal the offer to establish connection
+        peerRef.current.signal(offer);
+        setCallStatus("Accepting call...");
+      } catch (err) {
+        console.error("Media error:", err);
+        setCallStatus("Failed to access microphone: " + err.message);
+        endCall();
+      }
+    },
+    [SimplePeer, endCall]
+  );
 
   useEffect(() => {
     if (!userId) return;
@@ -87,39 +250,7 @@ export default function Call() {
         socketInstance.disconnect();
       }
     };
-  }, [userId]);
-
-  // Check if getUserMedia is available
-  const checkMediaSupport = () => {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      return false;
-    }
-    return true;
-  };
-
-  // Get user media with fallback
-  const getUserMedia = async (constraints) => {
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      return await navigator.mediaDevices.getUserMedia(constraints);
-    } else if (navigator.getUserMedia) {
-      // Fallback for older browsers
-      return new Promise((resolve, reject) => {
-        navigator.getUserMedia(constraints, resolve, reject);
-      });
-    } else if (navigator.webkitGetUserMedia) {
-      // Webkit fallback
-      return new Promise((resolve, reject) => {
-        navigator.webkitGetUserMedia(constraints, resolve, reject);
-      });
-    } else if (navigator.mozGetUserMedia) {
-      // Firefox fallback
-      return new Promise((resolve, reject) => {
-        navigator.mozGetUserMedia(constraints, resolve, reject);
-      });
-    } else {
-      throw new Error("getUserMedia is not supported in this browser");
-    }
-  };
+  }, [userId, handleAcceptCall, endCall]);
 
   const startCall = async () => {
     if (!userId || !targetId) {
@@ -228,116 +359,6 @@ export default function Call() {
       console.error("Media error:", err);
       setCallStatus("Failed to access microphone: " + err.message);
       endCall();
-    }
-  };
-
-  const handleAcceptCall = async (offer, from, socketInstance) => {
-    if (!SimplePeer) {
-      setCallStatus("WebRTC library not loaded");
-      return;
-    }
-
-    if (!checkMediaSupport()) {
-      setCallStatus("Microphone access not supported");
-      return;
-    }
-
-    try {
-      const stream = await getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-
-      if (audioRef.current) {
-        audioRef.current.srcObject = stream;
-      }
-
-      peerRef.current = new SimplePeer({
-        initiator: false,
-        trickle: false,
-        stream,
-        config: {
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:stun1.l.google.com:19302" },
-            { urls: "stun:stun2.l.google.com:19302" },
-          ],
-        },
-      });
-
-      console.log("Peer instance created for incoming call:", peerRef.current);
-
-      peerRef.current.on("signal", (data) => {
-        console.log("Signal event:", data.type);
-        if (data.type === "answer") {
-          socketInstance.emit("accept-call", { to: from, answer: data });
-        } else if (data.candidate) {
-          socketInstance.emit("ice-candidate", { to: from, candidate: data });
-        }
-      });
-
-      peerRef.current.on("stream", (remoteStream) => {
-        console.log("Remote stream received");
-        if (audioRef.current) {
-          audioRef.current.srcObject = remoteStream;
-        }
-        setCallStatus("Connected");
-      });
-
-      peerRef.current.on("connect", () => {
-        console.log("Peer connected");
-        setCallStatus("Connected");
-      });
-
-      peerRef.current.on("error", (err) => {
-        console.error("Peer error:", err);
-        setCallStatus("Call failed: " + err.message);
-        endCall();
-      });
-
-      peerRef.current.on("close", () => {
-        console.log("Peer connection closed");
-        endCall();
-      });
-
-      // Signal the offer to establish connection
-      peerRef.current.signal(offer);
-      setCallStatus("Accepting call...");
-    } catch (err) {
-      console.error("Media error:", err);
-      setCallStatus("Failed to access microphone: " + err.message);
-      endCall();
-    }
-  };
-
-  const endCall = () => {
-    console.log("Ending call");
-
-    if (peerRef.current && typeof peerRef.current.destroy === "function") {
-      try {
-        peerRef.current.destroy();
-      } catch (err) {
-        console.error("Error destroying peer:", err);
-      }
-    }
-    peerRef.current = null;
-
-    if (audioRef.current && audioRef.current.srcObject) {
-      audioRef.current.srcObject.getTracks().forEach((track) => {
-        track.stop();
-        console.log("Stopped track:", track.kind);
-      });
-      audioRef.current.srcObject = null;
-    }
-
-    setIsCalling(false);
-    setCallStatus("Call ended");
-
-    if (socket && socket.connected && targetId) {
-      socket.emit("end-call", { to: targetId });
     }
   };
 
@@ -461,30 +482,6 @@ export default function Call() {
         controls={false}
         style={{ display: "none" }}
       />
-
-      <div
-        style={{
-          fontSize: "12px",
-          color: "#6c757d",
-          marginTop: "20px",
-        }}
-      >
-        <p>Make sure both users are on this page and have entered their IDs.</p>
-        <p>Youl be prompted to allow microphone access when starting a call.</p>
-        <p>
-          <strong>Important:</strong> This app requires HTTPS to work properly.
-          If yore getting microphone errors, make sure youre accessing the site
-          via HTTPS.
-        </p>
-        <p>
-          Current protocol:{" "}
-          <code>
-            {typeof window !== "undefined"
-              ? window.location.protocol
-              : "unknown"}
-          </code>
-        </p>
-      </div>
     </div>
   );
 }
