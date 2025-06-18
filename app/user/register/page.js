@@ -67,12 +67,24 @@ export default function Signup() {
       setIsSubmitting(true);
 
       try {
-        // Simulate API call
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-
+        const response = await fetch("/api/user/auth", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(formData),
+        });
+        if (!response.ok) {
+          throw new Error("Network response was not ok");
+        }
+        const data = await response.json();
+        if (data.error) {
+          throw new Error(data.error);
+        }
+        // Simulate a successful registration
         setSubmitMessage({
           type: "success",
-          message: "Account created successfully! Welcome to SenaDrive.",
+          message: "Registration successful! Redirecting to login...",
         });
 
         // Reset form
