@@ -14,23 +14,25 @@ export default function RandomCall() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isInCall, setIsInCall] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [callStatus, setCallStatus] = useState("Click Find Someone to start");
+  const [callStatus, setCallStatus] = useState(
+    "Loading required components..."
+  );
   const [onlineCount, setOnlineCount] = useState(0);
   const [serverStats, setServerStats] = useState(null);
   const [socket, setSocket] = useState(null);
   const [SimplePeer, setSimplePeer] = useState(null);
   const [currentStream, setCurrentStream] = useState(null);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
-  const [isInitialized, setIsInitialized] = useState(false); // New state to track initialization
+  const [isInitialized, setIsInitialized] = useState(false);
   const peerRef = useRef(null);
   const audioRef = useRef(null);
   const userId = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const heartbeatIntervalRef = useRef(null);
 
-  // Load SimplePeer and Socket.IO dynamically
+  // Load SimplePeer, Socket.IO, and initialize media
   useEffect(() => {
-    const loadLibraries = async () => {
+    const loadLibrariesAndMedia = async () => {
       try {
         // Load SimplePeer
         const peerModule = await import("simple-peer");
@@ -42,19 +44,36 @@ export default function RandomCall() {
         const ioModule = await import("socket.io-client");
         const io = ioModule.default || ioModule.io;
 
-        // Initialize socket connection only after SimplePeer is loaded
+        // Initialize media stream
+        const stream = await getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 44100,
+          },
+        });
+        setCurrentStream(stream);
+        console.log("Media stream initialized");
+
+        // Initialize socket connection
         const socketInstance = initializeSocket(io);
         setSocket(socketInstance);
 
         // Mark initialization as complete
         setIsInitialized(true);
+        setCallStatus("Click Find Someone to start");
       } catch (error) {
-        console.error("Failed to load libraries:", error);
-        setCallStatus("Failed to load required libraries");
+        console.error("Failed to load libraries or media:", error);
+        setCallStatus(
+          error.name === "NotAllowedError"
+            ? "Please allow microphone access to start."
+            : "Failed to load required components. Please refresh."
+        );
       }
     };
 
-    loadLibraries();
+ ECOF loadLibrariesAndMedia();
   }, []);
 
   const initializeSocket = (io) => {
@@ -158,21 +177,24 @@ export default function RandomCall() {
         "Initiator:",
         initiator
       );
-      // Only proceed if fully initialized
       if (isInitialized && SimplePeer && currentStream) {
         setCallStatus("Found someone! Connecting...");
         handleMatchFound(partnerId, initiator, socketInstance);
       } else {
         console.error(
           "Cannot handle match: initialization incomplete or WebRTC not ready",
-          {
-            isInitialized,
-            SimplePeer: !!SimplePeer,
-            currentStream: !!currentStream,
-          }
+          { isInitialized, SimplePeer: !!SimplePeer, currentStream: !!currentStream }
         );
         setCallStatus("Error: Not ready to connect. Try again.");
         socketInstance.emit("end-call");
+        // Optionally re-queue the user
+        if (socketInstance.connected) {
+          setTimeout(() => {
+            if (isInitialized && SimplePeer && currentStream) {
+              socketInstance.emit("find-random");
+            }
+          }, 2000);
+        }
       }
     });
 
@@ -273,7 +295,7 @@ export default function RandomCall() {
       audioRef.current.srcObject = null;
     }
 
-    setIsInCallodb: true;
+    setIsInCall(false);
     setIsConnecting(false);
     setIsMuted(false);
     setCallStatus("Call ended. Click Find Someone to start again");
@@ -373,50 +395,22 @@ export default function RandomCall() {
   };
 
   const findRandomPerson = async () => {
-    if (!isInitialized || !SimplePeer || !socket || !socket.connected) {
-      setCallStatus("Loading or not connected. Please wait...");
+    if (!isInitialized || !SimplePeer || !socket || !socket.connected || !currentStream) {
+      setCallStatus("Application is not ready. Please wait or refresh...");
+      console.error("Cannot find random person: initialization incomplete", {
+        isInitialized,
+        SimplePeer: !!SimplePeer,
+        socket: !!socket,
+        socketConnected: socket?.connected,
+        currentStream: !!currentStream,
+      });
       return;
     }
 
     setIsConnecting(true);
-    setCallStatus("Getting microphone access...");
-
-    try {
-      const stream = await getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: 44100,
-        },
-      });
-
-      setCurrentStream(stream);
-
-      if (audioRef.current) {
-        audioRef.current.srcObject = stream;
-        audioRef.current.muted = true;
-      }
-
-      setCallStatus("Finding someone to talk to...");
-      socket.emit("find-random");
-    } catch (err) {
-      console.error("Media error:", err);
-      let errorMessage = "Failed to access microphone. ";
-
-      if ("NotAllowedError") {
-        errorMessage += "Please allow microphone access and try again.";
-      } else if (err.name === "NotFoundError") {
-        errorMessage += "No microphone found. Please connect a microphone.";
-      } else if (err.name === "NotReadableError") {
-        errorMessage += "Microphone is being used by another application.";
-      } else {
-        errorMessage += "Please check your microphone settings.";
-      }
-
-      setCallStatus(errorMessage);
-      setIsConnecting(false);
-    }
+   51
+    setCallStatus("Finding someone to talk to...");
+    socket.emit("find-random");
   };
 
   const toggleMute = () => {
@@ -488,7 +482,7 @@ export default function RandomCall() {
             </div>
 
             <h2 className="text-2xl font-bold mb-4">
-              {isInCall ? "You  re connected!" : "Talk to strangers"}
+              {isInCall ? "You're connected!" : "Talk to strangers"}
             </h2>
 
             <p className="text-lg text-gray-200 mb-6">{callStatus}</p>
@@ -498,12 +492,7 @@ export default function RandomCall() {
               {!isInCall && !isConnecting && (
                 <button
                   onClick={findRandomPerson}
-                  disabled={
-                    !isInitialized ||
-                    !socket ||
-                    !socket.connected ||
-                    !SimplePeer
-                  }
+                  disabled={!isInitialized || !socket || !socket.connected || !SimplePeer || !currentStream}
                   className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center space-x-2 transform transition hover:scale-105 shadow-lg"
                 >
                   <Phone className="w-5 h-5" />
@@ -582,7 +571,7 @@ export default function RandomCall() {
             </div>
             <div className="flex items-start space-x-2">
               <span className="text-pink-400">•</span>
-              <span>Use Next if conversation isn t working</span>
+              <span>Use Next if conversation isn't working</span>
             </div>
           </div>
         </div>
