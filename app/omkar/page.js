@@ -488,7 +488,7 @@ export default function RandomCall() {
             </div>
 
             <h2 className="text-2xl font-bold mb-4">
-              {isInCall ? "You're connected!" : "Talk to strangers"}
+              {isInCall ? "You  re connected!" : "Talk to strangers"}
             </h2>
 
             <p className="text-lg text-gray-200 mb-6">{callStatus}</p>
@@ -582,7 +582,7 @@ export default function RandomCall() {
             </div>
             <div className="flex items-start space-x-2">
               <span className="text-pink-400">•</span>
-              <span>Use Next if conversation isn't working</span>
+              <span>Use Next if conversation isn t working</span>
             </div>
           </div>
         </div>
