@@ -73,7 +73,7 @@ export default function RandomCall() {
       }
     };
 
- ECOF loadLibrariesAndMedia();
+    loadLibrariesAndMedia();
   }, []);
 
   const initializeSocket = (io) => {
@@ -183,7 +183,11 @@ export default function RandomCall() {
       } else {
         console.error(
           "Cannot handle match: initialization incomplete or WebRTC not ready",
-          { isInitialized, SimplePeer: !!SimplePeer, currentStream: !!currentStream }
+          {
+            isInitialized,
+            SimplePeer: !!SimplePeer,
+            currentStream: !!currentStream,
+          }
         );
         setCallStatus("Error: Not ready to connect. Try again.");
         socketInstance.emit("end-call");
@@ -395,7 +399,13 @@ export default function RandomCall() {
   };
 
   const findRandomPerson = async () => {
-    if (!isInitialized || !SimplePeer || !socket || !socket.connected || !currentStream) {
+    if (
+      !isInitialized ||
+      !SimplePeer ||
+      !socket ||
+      !socket.connected ||
+      !currentStream
+    ) {
       setCallStatus("Application is not ready. Please wait or refresh...");
       console.error("Cannot find random person: initialization incomplete", {
         isInitialized,
@@ -408,7 +418,7 @@ export default function RandomCall() {
     }
 
     setIsConnecting(true);
-   51
+    51;
     setCallStatus("Finding someone to talk to...");
     socket.emit("find-random");
   };
@@ -482,7 +492,7 @@ export default function RandomCall() {
             </div>
 
             <h2 className="text-2xl font-bold mb-4">
-              {isInCall ? "You're connected!" : "Talk to strangers"}
+              {isInCall ? "You  re connected!" : "Talk to strangers"}
             </h2>
 
             <p className="text-lg text-gray-200 mb-6">{callStatus}</p>
@@ -492,7 +502,13 @@ export default function RandomCall() {
               {!isInCall && !isConnecting && (
                 <button
                   onClick={findRandomPerson}
-                  disabled={!isInitialized || !socket || !socket.connected || !SimplePeer || !currentStream}
+                  disabled={
+                    !isInitialized ||
+                    !socket ||
+                    !socket.connected ||
+                    !SimplePeer ||
+                    !currentStream
+                  }
                   className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center space-x-2 transform transition hover:scale-105 shadow-lg"
                 >
                   <Phone className="w-5 h-5" />
@@ -571,7 +587,7 @@ export default function RandomCall() {
             </div>
             <div className="flex items-start space-x-2">
               <span className="text-pink-400">•</span>
-              <span>Use Next if conversation isn't working</span>
+              <span>Use Next if conversation isn t working</span>
             </div>
           </div>
         </div>
