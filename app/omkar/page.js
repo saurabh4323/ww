@@ -9,75 +9,207 @@ import {
   Volume2,
   Loader2,
 } from "lucide-react";
-import io from "socket.io-client"; // Add socket.io-client import
 
 export default function RandomCall() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isInCall, setIsInCall] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [callStatus, setCallStatus] = useState("Click  Find Someone  to start");
+  const [callStatus, setCallStatus] = useState("Click Find Someone to start");
   const [onlineCount, setOnlineCount] = useState(0);
   const [socket, setSocket] = useState(null);
   const [SimplePeer, setSimplePeer] = useState(null);
   const [currentStream, setCurrentStream] = useState(null);
+  const [connectionAttempts, setConnectionAttempts] = useState(0);
   const peerRef = useRef(null);
   const audioRef = useRef(null);
   const userId = useRef(Math.random().toString(36).substr(2, 9));
+  const reconnectTimeoutRef = useRef(null);
 
-  // Load SimplePeer dynamically
+  // Load SimplePeer and Socket.IO dynamically
   useEffect(() => {
-    const loadSimplePeer = async () => {
+    const loadLibraries = async () => {
       try {
+        // Load SimplePeer
         const peerModule = await import("simple-peer");
         const PeerConstructor = peerModule.default || peerModule;
         setSimplePeer(() => PeerConstructor);
         console.log("SimplePeer loaded successfully");
+
+        // Load Socket.IO
+        const ioModule = await import("socket.io-client");
+        const io = ioModule.default || ioModule.io;
+
+        // Initialize socket connection
+        initializeSocket(io);
       } catch (error) {
-        console.error("Failed to load SimplePeer:", error);
-        setCallStatus("Failed to load WebRTC library");
+        console.error("Failed to load libraries:", error);
+        setCallStatus("Failed to load required libraries");
       }
     };
 
-    loadSimplePeer();
+    loadLibraries();
   }, []);
 
-  // Real getUserMedia implementation
+  const initializeSocket = (io) => {
+    const socketInstance = io("https://anonymoluscall-1.onrender.com", {
+      path: "/socket.io",
+      transports: ["websocket", "polling"],
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+      forceNew: true,
+      upgrade: true,
+      rememberUpgrade: false,
+    });
+
+    setSocket(socketInstance);
+
+    socketInstance.on("connect", () => {
+      console.log("Connected to server with ID:", socketInstance.id);
+      setCallStatus("Connected to server. Click Find Someone to start");
+      setConnectionAttempts(0);
+
+      // Clear any existing reconnection timeout
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+    });
+
+    socketInstance.on("connect_error", (err) => {
+      console.error("Connection error:", err);
+      setConnectionAttempts((prev) => prev + 1);
+
+      if (connectionAttempts < 5) {
+        setCallStatus(
+          `Connection failed. Retrying... (${connectionAttempts + 1}/5)`
+        );
+
+        // Retry connection after delay
+        reconnectTimeoutRef.current = setTimeout(() => {
+          console.log("Retrying connection...");
+          socketInstance.connect();
+        }, 2000 * (connectionAttempts + 1));
+      } else {
+        setCallStatus("Failed to connect to server. Please refresh the page.");
+      }
+    });
+
+    socketInstance.on("disconnect", (reason) => {
+      console.log("Disconnected from server:", reason);
+      setCallStatus("Disconnected from server. Reconnecting...");
+
+      // Clean up any active call
+      if (isInCall || isConnecting) {
+        endCall();
+      }
+    });
+
+    socketInstance.on("reconnect", (attemptNumber) => {
+      console.log("Reconnected to server after", attemptNumber, "attempts");
+      setCallStatus("Reconnected to server. Click Find Someone to start");
+      setConnectionAttempts(0);
+    });
+
+    socketInstance.on("online-count", (count) => {
+      setOnlineCount(count);
+    });
+
+    socketInstance.on("waiting-for-match", () => {
+      setCallStatus("Looking for someone to talk to...");
+    });
+
+    socketInstance.on("match-found", ({ partnerId, initiator }) => {
+      setCallStatus("Found someone! Connecting...");
+      handleMatchFound(partnerId, initiator, socketInstance);
+    });
+
+    socketInstance.on("webrtc-offer", ({ from, offer }) => {
+      if (peerRef.current && typeof peerRef.current.signal === "function") {
+        try {
+          peerRef.current.signal(offer);
+        } catch (err) {
+          console.error("Error handling WebRTC offer:", err);
+        }
+      }
+    });
+
+    socketInstance.on("webrtc-answer", ({ from, answer }) => {
+      if (peerRef.current && typeof peerRef.current.signal === "function") {
+        try {
+          peerRef.current.signal(answer);
+        } catch (err) {
+          console.error("Error handling WebRTC answer:", err);
+        }
+      }
+    });
+
+    socketInstance.on("ice-candidate", ({ from, candidate }) => {
+      if (peerRef.current && typeof peerRef.current.signal === "function") {
+        try {
+          peerRef.current.signal(candidate);
+        } catch (err) {
+          console.error("Error handling ICE candidate:", err);
+        }
+      }
+    });
+
+    socketInstance.on("call-ended", () => {
+      endCall();
+    });
+
+    return socketInstance;
+  };
+
+  // Real getUserMedia implementation with better error handling
   const getUserMedia = async (constraints) => {
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      return await navigator.mediaDevices.getUserMedia(constraints);
-    } else if (navigator.getUserMedia) {
-      return new Promise((resolve, reject) => {
-        navigator.getUserMedia(constraints, resolve, reject);
-      });
-    } else if (navigator.webkitGetUserMedia) {
-      return new Promise((resolve, reject) => {
-        navigator.webkitGetUserMedia(constraints, resolve, reject);
-      });
-    } else if (navigator.mozGetUserMedia) {
-      return new Promise((resolve, reject) => {
-        navigator.mozGetUserMedia(constraints, resolve, reject);
-      });
-    } else {
-      throw new Error("getUserMedia is not supported in this browser");
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } else if (navigator.getUserMedia) {
+        return new Promise((resolve, reject) => {
+          navigator.getUserMedia(constraints, resolve, reject);
+        });
+      } else if (navigator.webkitGetUserMedia) {
+        return new Promise((resolve, reject) => {
+          navigator.webkitGetUserMedia(constraints, resolve, reject);
+        });
+      } else if (navigator.mozGetUserMedia) {
+        return new Promise((resolve, reject) => {
+          navigator.mozGetUserMedia(constraints, resolve, reject);
+        });
+      } else {
+        throw new Error("getUserMedia is not supported in this browser");
+      }
+    } catch (error) {
+      console.error("getUserMedia error:", error);
+      throw error;
     }
   };
 
   const endCall = () => {
     console.log("Ending call");
 
-    if (peerRef.current && typeof peerRef.current.destroy === "function") {
+    if (peerRef.current) {
       try {
-        peerRef.current.destroy();
+        if (typeof peerRef.current.destroy === "function") {
+          peerRef.current.destroy();
+        }
       } catch (err) {
         console.error("Error destroying peer:", err);
       }
+      peerRef.current = null;
     }
-    peerRef.current = null;
 
     if (currentStream) {
       currentStream.getTracks().forEach((track) => {
-        track.stop();
-        console.log("Stopped track:", track.kind);
+        try {
+          track.stop();
+          console.log("Stopped track:", track.kind);
+        } catch (err) {
+          console.error("Error stopping track:", err);
+        }
       });
       setCurrentStream(null);
     }
@@ -89,7 +221,7 @@ export default function RandomCall() {
     setIsInCall(false);
     setIsConnecting(false);
     setIsMuted(false);
-    setCallStatus("Call ended. Click  Find Someone  to start again");
+    setCallStatus("Call ended. Click Find Someone to start again");
 
     if (socket && socket.connected) {
       socket.emit("end-call");
@@ -103,7 +235,7 @@ export default function RandomCall() {
     }
 
     try {
-      peerRef.current = new SimplePeer({
+      const peerConfig = {
         initiator: isInitiator,
         trickle: false,
         stream: currentStream,
@@ -112,17 +244,25 @@ export default function RandomCall() {
             { urls: "stun:stun.l.google.com:19302" },
             { urls: "stun:stun1.l.google.com:19302" },
             { urls: "stun:stun2.l.google.com:19302" },
+            { urls: "stun:stun3.l.google.com:19302" },
+            { urls: "stun:stun4.l.google.com:19302" },
           ],
         },
-      });
+      };
+
+      peerRef.current = new SimplePeer(peerConfig);
 
       peerRef.current.on("signal", (data) => {
-        if (data.type === "offer") {
-          socketInstance.emit("webrtc-offer", { offer: data });
-        } else if (data.type === "answer") {
-          socketInstance.emit("webrtc-answer", { answer: data });
-        } else if (data.candidate) {
-          socketInstance.emit("ice-candidate", { candidate: data });
+        try {
+          if (data.type === "offer") {
+            socketInstance.emit("webrtc-offer", { offer: data });
+          } else if (data.type === "answer") {
+            socketInstance.emit("webrtc-answer", { answer: data });
+          } else if (data.candidate) {
+            socketInstance.emit("ice-candidate", { candidate: data });
+          }
+        } catch (err) {
+          console.error("Error emitting signal:", err);
         }
       });
 
@@ -130,6 +270,9 @@ export default function RandomCall() {
         console.log("Remote stream received");
         if (audioRef.current) {
           audioRef.current.srcObject = remoteStream;
+          audioRef.current.play().catch((err) => {
+            console.error("Error playing audio:", err);
+          });
         }
         setIsConnecting(false);
         setIsInCall(true);
@@ -153,6 +296,15 @@ export default function RandomCall() {
         console.log("Peer connection closed");
         endCall();
       });
+
+      // Set a timeout for connection attempt
+      setTimeout(() => {
+        if (isConnecting && !isInCall) {
+          console.log("Connection timeout");
+          setCallStatus("Connection timed out. Try again.");
+          endCall();
+        }
+      }, 30000); // 30 second timeout
     } catch (err) {
       console.error("Error creating peer:", err);
       setCallStatus("Failed to connect. Try again.");
@@ -167,7 +319,7 @@ export default function RandomCall() {
     }
 
     if (!socket || !socket.connected) {
-      setCallStatus("Not connected to server");
+      setCallStatus("Not connected to server. Please wait...");
       return;
     }
 
@@ -180,21 +332,35 @@ export default function RandomCall() {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          sampleRate: 44100,
         },
       });
 
       setCurrentStream(stream);
+
+      // Test local audio (muted to prevent feedback)
       if (audioRef.current) {
         audioRef.current.srcObject = stream;
+        audioRef.current.muted = true; // Mute local audio to prevent feedback
       }
 
       setCallStatus("Finding someone to talk to...");
       socket.emit("find-random");
     } catch (err) {
       console.error("Media error:", err);
-      setCallStatus(
-        "Failed to access microphone. Please allow microphone access."
-      );
+      let errorMessage = "Failed to access microphone. ";
+
+      if (err.name === "NotAllowedError") {
+        errorMessage += "Please allow microphone access and try again.";
+      } else if (err.name === "NotFoundError") {
+        errorMessage += "No microphone found. Please connect a microphone.";
+      } else if (err.name === "NotReadableError") {
+        errorMessage += "Microphone is being used by another application.";
+      } else {
+        errorMessage += "Please check your microphone settings.";
+      }
+
+      setCallStatus(errorMessage);
       setIsConnecting(false);
     }
   };
@@ -212,72 +378,23 @@ export default function RandomCall() {
     endCall();
     setTimeout(() => {
       findRandomPerson();
-    }, 500);
+    }, 1000);
   };
 
-  // Socket connection setup
+  // Cleanup on unmount
   useEffect(() => {
-    const socketInstance = io("https://anonymoluscall-1.onrender.com", {
-      // Update to match server port
-      path: "/socket.io",
-      transports: ["websocket", "polling"],
-      reconnectionAttempts: 5,
-      timeout: 20000,
-    });
-
-    setSocket(socketInstance);
-
-    socketInstance.on("connect", () => {
-      console.log("Connected to server");
-      setCallStatus("Connected to server. Click Find Someone to start");
-    });
-
-    socketInstance.on("connect_error", (err) => {
-      console.error("Connection error:", err);
-      setCallStatus("Failed to connect to server");
-    });
-
-    socketInstance.on("online-count", (count) => {
-      setOnlineCount(count);
-    });
-
-    socketInstance.on("waiting-for-match", () => {
-      setCallStatus("Looking for someone to talk to...");
-    });
-
-    socketInstance.on("match-found", ({ partnerId, initiator }) => {
-      setCallStatus("Found someone! Connecting...");
-      handleMatchFound(partnerId, initiator, socketInstance);
-    });
-
-    socketInstance.on("webrtc-offer", ({ from, offer }) => {
-      if (peerRef.current && typeof peerRef.current.signal === "function") {
-        peerRef.current.signal(offer);
-      }
-    });
-
-    socketInstance.on("webrtc-answer", ({ from, answer }) => {
-      if (peerRef.current && typeof peerRef.current.signal === "function") {
-        peerRef.current.signal(answer);
-      }
-    });
-
-    socketInstance.on("ice-candidate", ({ from, candidate }) => {
-      if (peerRef.current && typeof peerRef.current.signal === "function") {
-        peerRef.current.signal(candidate);
-      }
-    });
-
-    socketInstance.on("call-ended", () => {
-      endCall();
-    });
-
     return () => {
-      if (socketInstance) {
-        socketInstance.disconnect();
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+
+      endCall();
+
+      if (socket) {
+        socket.disconnect();
       }
     };
-  }, [SimplePeer]);
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 text-white">
@@ -316,17 +433,18 @@ export default function RandomCall() {
             </div>
 
             <h2 className="text-2xl font-bold mb-4">
-              {isInCall ? "You re connected!" : "Talk to strangers"}
+              {isInCall ? "You're connected!" : "Talk to strangers"}
             </h2>
 
             <p className="text-lg text-gray-200 mb-6">{callStatus}</p>
 
             {/* Action Buttons */}
-            <div className="flex justify-center space-x-4">
+            <div className="flex flex-wrap justify-center gap-4">
               {!isInCall && !isConnecting && (
                 <button
                   onClick={findRandomPerson}
-                  className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center space-x-2 transform transition hover:scale-105 shadow-lg"
+                  disabled={!socket || !socket.connected}
+                  className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center space-x-2 transform transition hover:scale-105 shadow-lg"
                 >
                   <Phone className="w-5 h-5" />
                   <span>Find Someone</span>
@@ -336,8 +454,8 @@ export default function RandomCall() {
               {isConnecting && (
                 <button
                   onClick={() => {
-                    setIsConnecting(false);
-                    setCallStatus("Click  Find Someone  to start");
+                    endCall();
+                    setCallStatus("Click Find Someone to start");
                   }}
                   className="bg-red-500 hover:bg-red-600 text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center space-x-2 transform transition hover:scale-105"
                 >
@@ -404,7 +522,7 @@ export default function RandomCall() {
             </div>
             <div className="flex items-start space-x-2">
               <span className="text-pink-400">•</span>
-              <span>Use Next if conversation isn t working</span>
+              <span>Use Next if conversation isn't working</span>
             </div>
           </div>
         </div>
