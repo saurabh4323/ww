@@ -201,7 +201,7 @@ export default function RandomCall() {
         currentStreamValue: !!currentStreamValue,
       });
 
-      // Only handle match if we're actively searching and have all required components
+      // Only handle match if we  re actively searching and have all required components
       if (
         currentlySearching &&
         currentlyInitialized &&
@@ -215,14 +215,14 @@ export default function RandomCall() {
       } else {
         console.log("Cannot handle match - not ready or not searching");
 
-        // If we're not actively searching, reject the match
+        // If we  re not actively searching, reject the match
         if (!currentlySearching) {
           console.log("Rejecting match - not actively searching");
           socketInstance.emit("end-call");
           return;
         }
 
-        // If we're searching but not ready, send not-ready signal
+        // If we  re searching but not ready, send not-ready signal
         console.log("Sending not-ready signal to server");
         socketInstance.emit("not-ready");
       }
@@ -583,7 +583,7 @@ export default function RandomCall() {
             </div>
 
             <h2 className="text-2xl font-bold mb-4">
-              {isInCall ? "You're connected!" : "Talk to strangers"}
+              {isInCall ? "You  re connected!" : "Talk to strangers"}
             </h2>
 
             <p className="text-lg text-gray-200 mb-6">{callStatus}</p>
@@ -674,7 +674,7 @@ export default function RandomCall() {
             </div>
             <div className="flex items-start space-x-2">
               <span className="text-pink-400">•</span>
-              <span>Use Next if conversation isn't working</span>
+              <span>Use Next if conversation isn t working</span>
             </div>
           </div>
         </div>
