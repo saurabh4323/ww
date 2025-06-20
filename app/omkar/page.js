@@ -14,16 +14,20 @@ export default function RandomCall() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isInCall, setIsInCall] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [callStatus, setCallStatus] = useState("Click Find Someone to start");
+  const [callStatus, setCallStatus] = useState(
+    "Click   Find Someone   to start"
+  );
   const [onlineCount, setOnlineCount] = useState(0);
+  const [serverStats, setServerStats] = useState(null);
   const [socket, setSocket] = useState(null);
   const [SimplePeer, setSimplePeer] = useState(null);
   const [currentStream, setCurrentStream] = useState(null);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
   const peerRef = useRef(null);
   const audioRef = useRef(null);
-  const userId = useRef(Math.random().toString(36).substr(2, 9));
+  const userId = useRef(null); // Will be set by server
   const reconnectTimeoutRef = useRef(null);
+  const heartbeatIntervalRef = useRef(null);
 
   // Load SimplePeer and Socket.IO dynamically
   useEffect(() => {
@@ -51,7 +55,7 @@ export default function RandomCall() {
   }, []);
 
   const initializeSocket = (io) => {
-    const socketInstance = io("https://anonymoluscall-1.onrender.com", {
+    const socketInstance = io("https://anonymoluscall-1.onrender.com:10000", {
       path: "/socket.io",
       transports: ["websocket", "polling"],
       reconnectionAttempts: 10,
@@ -67,15 +71,27 @@ export default function RandomCall() {
 
     socketInstance.on("connect", () => {
       console.log("Connected to server with ID:", socketInstance.id);
-      setCallStatus("Connected to server. Click Find Someone to start");
+      setCallStatus("Connected to server. Click   Find Someone   to start");
       setConnectionAttempts(0);
 
-      // Clear any existing reconnection timeout
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
+      // Start heartbeat
+      heartbeatIntervalRef.current = setInterval(() => {
+        if (socketInstance.connected) {
+          socketInstance.emit("heartbeat");
+        }
+      }, 20000); // Send heartbeat every 20 seconds
     });
+
+    socketInstance.on(
+      "connect-info",
+      ({ userId: serverUserId, onlineCount, serverTime }) => {
+        userId.current = serverUserId;
+        setOnlineCount(onlineCount);
+        console.log(
+          `Received connect-info: userId=${serverUserId}, serverTime=${serverTime}`
+        );
+      }
+    );
 
     socketInstance.on("connect_error", (err) => {
       console.error("Connection error:", err);
@@ -83,10 +99,9 @@ export default function RandomCall() {
 
       if (connectionAttempts < 5) {
         setCallStatus(
-          `Connection failed. Retrying... (${connectionAttempts + 1}/5)`
+          `Connection failed. Retrying... ${connectionAttempts + 1}/5`
         );
 
-        // Retry connection after delay
         reconnectTimeoutRef.current = setTimeout(() => {
           console.log("Retrying connection...");
           socketInstance.connect();
@@ -99,16 +114,17 @@ export default function RandomCall() {
     socketInstance.on("disconnect", (reason) => {
       console.log("Disconnected from server:", reason);
       setCallStatus("Disconnected from server. Reconnecting...");
-
-      // Clean up any active call
       if (isInCall || isConnecting) {
         endCall();
+      }
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
       }
     });
 
     socketInstance.on("reconnect", (attemptNumber) => {
       console.log("Reconnected to server after", attemptNumber, "attempts");
-      setCallStatus("Reconnected to server. Click Find Someone to start");
+      setCallStatus("Reconnected to server. Click   Find Someone   to start");
       setConnectionAttempts(0);
     });
 
@@ -116,13 +132,39 @@ export default function RandomCall() {
       setOnlineCount(count);
     });
 
+    socketInstance.on("server-stats", (stats) => {
+      setServerStats(stats);
+      console.log("Server stats:", stats);
+    });
+
+    socketInstance.on("server-shutdown", ({ message, timestamp }) => {
+      console.log("Server shutdown:", message, timestamp);
+      setCallStatus(message);
+      endCall();
+      if (socketInstance.connected) {
+        socketInstance.disconnect();
+      }
+    });
+
     socketInstance.on("waiting-for-match", () => {
       setCallStatus("Looking for someone to talk to...");
     });
 
     socketInstance.on("match-found", ({ partnerId, initiator }) => {
-      setCallStatus("Found someone! Connecting...");
-      handleMatchFound(partnerId, initiator, socketInstance);
+      console.log(
+        "Match found with partner:",
+        partnerId,
+        "Initiator:",
+        initiator
+      );
+      if (SimplePeer && currentStream) {
+        setCallStatus("Found someone! Connecting...");
+        handleMatchFound(partnerId, initiator, socketInstance);
+      } else {
+        console.error("WebRTC not ready: SimplePeer or currentStream missing");
+        setCallStatus("Error: WebRTC not ready. Try again.");
+        socketInstance.emit("end-call");
+      }
     });
 
     socketInstance.on("webrtc-offer", ({ from, offer }) => {
@@ -156,13 +198,17 @@ export default function RandomCall() {
     });
 
     socketInstance.on("call-ended", () => {
+      console.log("Call ended by server");
       endCall();
+    });
+
+    socketInstance.on("heartbeat-ack", () => {
+      console.log("Heartbeat acknowledged");
     });
 
     return socketInstance;
   };
 
-  // Real getUserMedia implementation with better error handling
   const getUserMedia = async (constraints) => {
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -221,7 +267,7 @@ export default function RandomCall() {
     setIsInCall(false);
     setIsConnecting(false);
     setIsMuted(false);
-    setCallStatus("Call ended. Click Find Someone to start again");
+    setCallStatus("Call ended. Click   Find Someone   to start again");
 
     if (socket && socket.connected) {
       socket.emit("end-call");
@@ -229,8 +275,14 @@ export default function RandomCall() {
   };
 
   const handleMatchFound = async (partnerId, isInitiator, socketInstance) => {
-    if (!SimplePeer || !currentStream) {
-      setCallStatus("Error: WebRTC not ready");
+    if (!SimplePeer || !currentStream || !socketInstance.connected) {
+      console.error(
+        "WebRTC not ready: SimplePeer, currentStream, or socket missing"
+      );
+      setCallStatus("Error: WebRTC not ready. Try again.");
+      if (socketInstance.connected) {
+        socketInstance.emit("end-call");
+      }
       return;
     }
 
@@ -297,7 +349,6 @@ export default function RandomCall() {
         endCall();
       });
 
-      // Set a timeout for connection attempt
       setTimeout(() => {
         if (isConnecting && !isInCall) {
           console.log("Connection timeout");
@@ -308,18 +359,13 @@ export default function RandomCall() {
     } catch (err) {
       console.error("Error creating peer:", err);
       setCallStatus("Failed to connect. Try again.");
-      setIsConnecting(false);
+      endCall();
     }
   };
 
   const findRandomPerson = async () => {
-    if (!SimplePeer) {
-      setCallStatus("Loading...");
-      return;
-    }
-
-    if (!socket || !socket.connected) {
-      setCallStatus("Not connected to server. Please wait...");
+    if (!SimplePeer || !socket || !socket.connected) {
+      setCallStatus("Loading or not connected. Please wait...");
       return;
     }
 
@@ -338,10 +384,9 @@ export default function RandomCall() {
 
       setCurrentStream(stream);
 
-      // Test local audio (muted to prevent feedback)
       if (audioRef.current) {
         audioRef.current.srcObject = stream;
-        audioRef.current.muted = true; // Mute local audio to prevent feedback
+        audioRef.current.muted = true;
       }
 
       setCallStatus("Finding someone to talk to...");
@@ -387,14 +432,15 @@ export default function RandomCall() {
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
-
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+      }
       endCall();
-
       if (socket) {
         socket.disconnect();
       }
     };
-  }, []);
+  }, [socket]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 text-white">
@@ -433,7 +479,7 @@ export default function RandomCall() {
             </div>
 
             <h2 className="text-2xl font-bold mb-4">
-              {isInCall ? "You re connected!" : "Talk to strangers"}
+              {isInCall ? "You  re connected!" : "Talk to strangers"}
             </h2>
 
             <p className="text-lg text-gray-200 mb-6">{callStatus}</p>
@@ -443,7 +489,7 @@ export default function RandomCall() {
               {!isInCall && !isConnecting && (
                 <button
                   onClick={findRandomPerson}
-                  disabled={!socket || !socket.connected}
+                  disabled={!socket || !socket.connected || !SimplePeer}
                   className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center space-x-2 transform transition hover:scale-105 shadow-lg"
                 >
                   <Phone className="w-5 h-5" />
@@ -455,7 +501,7 @@ export default function RandomCall() {
                 <button
                   onClick={() => {
                     endCall();
-                    setCallStatus("Click Find Someone to start");
+                    setCallStatus("Click   Find Someone   to start");
                   }}
                   className="bg-red-500 hover:bg-red-600 text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center space-x-2 transform transition hover:scale-105"
                 >
