@@ -15,7 +15,7 @@ export default function RandomCall() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isInCall, setIsInCall] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [callStatus, setCallStatus] = useState("Click 'Find Someone' to start");
+  const [callStatus, setCallStatus] = useState("Click  Find Someone  to start");
   const [onlineCount, setOnlineCount] = useState(0);
   const [socket, setSocket] = useState(null);
   const [SimplePeer, setSimplePeer] = useState(null);
@@ -89,7 +89,7 @@ export default function RandomCall() {
     setIsInCall(false);
     setIsConnecting(false);
     setIsMuted(false);
-    setCallStatus("Call ended. Click 'Find Someone' to start again");
+    setCallStatus("Call ended. Click  Find Someone  to start again");
 
     if (socket && socket.connected) {
       socket.emit("end-call");
@@ -229,7 +229,7 @@ export default function RandomCall() {
 
     socketInstance.on("connect", () => {
       console.log("Connected to server");
-      setCallStatus("Connected to server. Click 'Find Someone' to start");
+      setCallStatus("Connected to server. Click Find Someone to start");
     });
 
     socketInstance.on("connect_error", (err) => {
@@ -316,7 +316,7 @@ export default function RandomCall() {
             </div>
 
             <h2 className="text-2xl font-bold mb-4">
-              {isInCall ? "You're connected!" : "Talk to strangers"}
+              {isInCall ? "You re connected!" : "Talk to strangers"}
             </h2>
 
             <p className="text-lg text-gray-200 mb-6">{callStatus}</p>
@@ -337,7 +337,7 @@ export default function RandomCall() {
                 <button
                   onClick={() => {
                     setIsConnecting(false);
-                    setCallStatus("Click 'Find Someone' to start");
+                    setCallStatus("Click  Find Someone  to start");
                   }}
                   className="bg-red-500 hover:bg-red-600 text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center space-x-2 transform transition hover:scale-105"
                 >
@@ -404,7 +404,7 @@ export default function RandomCall() {
             </div>
             <div className="flex items-start space-x-2">
               <span className="text-pink-400">•</span>
-              <span>Use 'Next' if conversation isn't working</span>
+              <span>Use Next if conversation isn t working</span>
             </div>
           </div>
         </div>
