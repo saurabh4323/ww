@@ -14,18 +14,17 @@ export default function RandomCall() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [isInCall, setIsInCall] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [callStatus, setCallStatus] = useState(
-    "Click   Find Someone   to start"
-  );
+  const [callStatus, setCallStatus] = useState("Click Find Someone to start");
   const [onlineCount, setOnlineCount] = useState(0);
   const [serverStats, setServerStats] = useState(null);
   const [socket, setSocket] = useState(null);
   const [SimplePeer, setSimplePeer] = useState(null);
   const [currentStream, setCurrentStream] = useState(null);
   const [connectionAttempts, setConnectionAttempts] = useState(0);
+  const [isInitialized, setIsInitialized] = useState(false); // New state to track initialization
   const peerRef = useRef(null);
   const audioRef = useRef(null);
-  const userId = useRef(null); // Will be set by server
+  const userId = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const heartbeatIntervalRef = useRef(null);
 
@@ -43,8 +42,12 @@ export default function RandomCall() {
         const ioModule = await import("socket.io-client");
         const io = ioModule.default || ioModule.io;
 
-        // Initialize socket connection
-        initializeSocket(io);
+        // Initialize socket connection only after SimplePeer is loaded
+        const socketInstance = initializeSocket(io);
+        setSocket(socketInstance);
+
+        // Mark initialization as complete
+        setIsInitialized(true);
       } catch (error) {
         console.error("Failed to load libraries:", error);
         setCallStatus("Failed to load required libraries");
@@ -67,11 +70,9 @@ export default function RandomCall() {
       rememberUpgrade: false,
     });
 
-    setSocket(socketInstance);
-
     socketInstance.on("connect", () => {
       console.log("Connected to server with ID:", socketInstance.id);
-      setCallStatus("Connected to server. Click   Find Someone   to start");
+      setCallStatus("Connected to server. Click Find Someone to start");
       setConnectionAttempts(0);
 
       // Start heartbeat
@@ -79,7 +80,7 @@ export default function RandomCall() {
         if (socketInstance.connected) {
           socketInstance.emit("heartbeat");
         }
-      }, 20000); // Send heartbeat every 20 seconds
+      }, 20000);
     });
 
     socketInstance.on(
@@ -124,7 +125,7 @@ export default function RandomCall() {
 
     socketInstance.on("reconnect", (attemptNumber) => {
       console.log("Reconnected to server after", attemptNumber, "attempts");
-      setCallStatus("Reconnected to server. Click   Find Someone   to start");
+      setCallStatus("Reconnected to server. Click Find Someone to start");
       setConnectionAttempts(0);
     });
 
@@ -157,12 +158,20 @@ export default function RandomCall() {
         "Initiator:",
         initiator
       );
-      if (SimplePeer && currentStream) {
+      // Only proceed if fully initialized
+      if (isInitialized && SimplePeer && currentStream) {
         setCallStatus("Found someone! Connecting...");
         handleMatchFound(partnerId, initiator, socketInstance);
       } else {
-        console.error("WebRTC not ready: SimplePeer or currentStream missing");
-        setCallStatus("Error: WebRTC not ready. Try again.");
+        console.error(
+          "Cannot handle match: initialization incomplete or WebRTC not ready",
+          {
+            isInitialized,
+            SimplePeer: !!SimplePeer,
+            currentStream: !!currentStream,
+          }
+        );
+        setCallStatus("Error: Not ready to connect. Try again.");
         socketInstance.emit("end-call");
       }
     });
@@ -264,10 +273,10 @@ export default function RandomCall() {
       audioRef.current.srcObject = null;
     }
 
-    setIsInCall(false);
+    setIsInCallodb: true;
     setIsConnecting(false);
     setIsMuted(false);
-    setCallStatus("Call ended. Click   Find Someone   to start again");
+    setCallStatus("Call ended. Click Find Someone to start again");
 
     if (socket && socket.connected) {
       socket.emit("end-call");
@@ -355,7 +364,7 @@ export default function RandomCall() {
           setCallStatus("Connection timed out. Try again.");
           endCall();
         }
-      }, 30000); // 30 second timeout
+      }, 30000);
     } catch (err) {
       console.error("Error creating peer:", err);
       setCallStatus("Failed to connect. Try again.");
@@ -364,7 +373,7 @@ export default function RandomCall() {
   };
 
   const findRandomPerson = async () => {
-    if (!SimplePeer || !socket || !socket.connected) {
+    if (!isInitialized || !SimplePeer || !socket || !socket.connected) {
       setCallStatus("Loading or not connected. Please wait...");
       return;
     }
@@ -395,7 +404,7 @@ export default function RandomCall() {
       console.error("Media error:", err);
       let errorMessage = "Failed to access microphone. ";
 
-      if (err.name === "NotAllowedError") {
+      if ("NotAllowedError") {
         errorMessage += "Please allow microphone access and try again.";
       } else if (err.name === "NotFoundError") {
         errorMessage += "No microphone found. Please connect a microphone.";
@@ -479,7 +488,7 @@ export default function RandomCall() {
             </div>
 
             <h2 className="text-2xl font-bold mb-4">
-              {isInCall ? "You  re connected!" : "Talk to strangers"}
+              {isInCall ? "You're connected!" : "Talk to strangers"}
             </h2>
 
             <p className="text-lg text-gray-200 mb-6">{callStatus}</p>
@@ -489,7 +498,12 @@ export default function RandomCall() {
               {!isInCall && !isConnecting && (
                 <button
                   onClick={findRandomPerson}
-                  disabled={!socket || !socket.connected || !SimplePeer}
+                  disabled={
+                    !isInitialized ||
+                    !socket ||
+                    !socket.connected ||
+                    !SimplePeer
+                  }
                   className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 disabled:from-gray-500 disabled:to-gray-600 disabled:cursor-not-allowed text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center space-x-2 transform transition hover:scale-105 shadow-lg"
                 >
                   <Phone className="w-5 h-5" />
@@ -501,7 +515,7 @@ export default function RandomCall() {
                 <button
                   onClick={() => {
                     endCall();
-                    setCallStatus("Click   Find Someone   to start");
+                    setCallStatus("Click Find Someone to start");
                   }}
                   className="bg-red-500 hover:bg-red-600 text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center space-x-2 transform transition hover:scale-105"
                 >
@@ -568,7 +582,7 @@ export default function RandomCall() {
             </div>
             <div className="flex items-start space-x-2">
               <span className="text-pink-400">•</span>
-              <span>Use Next if conversation isn t working</span>
+              <span>Use Next if conversation isn't working</span>
             </div>
           </div>
         </div>
