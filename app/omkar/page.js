@@ -389,11 +389,23 @@ export default function RandomCall() {
       });
 
       peerRef.current.on("stream", (remoteStream) => {
-        console.log("Remote stream received");
+        console.log("Remote stream received:", remoteStream);
+        console.log("Remote audio tracks:", remoteStream.getAudioTracks());
+
+        if (remoteStream.getAudioTracks().length === 0) {
+          console.error("No audio tracks in remote stream");
+          setCallStatus("Connected, but no audio received. Try again.");
+          return;
+        }
+
         if (audioRef.current) {
           audioRef.current.srcObject = remoteStream;
+          audioRef.current.muted = false; // Ensure remote audio is not muted
           audioRef.current.play().catch((err) => {
-            console.error("Error playing audio:", err);
+            console.error("Error playing remote audio:", err);
+            setCallStatus(
+              "Error playing audio. Please check browser settings."
+            );
           });
         }
         setIsConnecting(false);
@@ -445,13 +457,11 @@ export default function RandomCall() {
       return;
     }
 
-    // Set searching state first
     setIsSearching(true);
     setIsConnecting(true);
     setCallStatus("Getting microphone access...");
 
     try {
-      // Get microphone access
       const stream = await getUserMedia({
         audio: {
           echoCancellation: true,
@@ -461,13 +471,20 @@ export default function RandomCall() {
         },
       });
 
+      // Log stream details
+      console.log("Local stream acquired:", stream);
+      console.log("Audio tracks:", stream.getAudioTracks());
+
+      if (stream.getAudioTracks().length === 0) {
+        throw new Error("No audio tracks found in stream");
+      }
+
       setCurrentStream(stream);
       if (audioRef.current) {
         audioRef.current.srcObject = stream;
-        audioRef.current.muted = true;
+        audioRef.current.muted = true; // Mute local audio to prevent feedback
       }
 
-      // Small delay to ensure state is updated
       setTimeout(() => {
         setCallStatus("Finding someone to talk to...");
         socket.emit("find-random");
@@ -482,7 +499,7 @@ export default function RandomCall() {
       } else if (err.name === "NotReadableError") {
         errorMessage += "Microphone is being used by another application.";
       } else {
-        errorMessage += "Please check your microphone settings.";
+        errorMessage += `Please check your microphone settings. Error: ${err.message}`;
       }
       setCallStatus(errorMessage);
       setIsConnecting(false);
