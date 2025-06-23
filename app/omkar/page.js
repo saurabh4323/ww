@@ -86,7 +86,7 @@ export default function RandomCall() {
   }, []);
 
   const initializeSocket = (io) => {
-    const socketInstance = io("https://anonymoluscall.onrender.com", {
+    const socketInstance = io("http://localhost:10000", {
       path: "/socket.io",
       transports: ["websocket", "polling"],
       reconnectionAttempts: 10,

@@ -1,10 +1,13 @@
 import React from "react";
-import Uploads from "./uploads/page";
+
+import RandomCall from "./omkar/page";
+import RandomVideoCall from "./omkar/video/page";
 // import Home from "./home/page";
 export default function page() {
   return (
     <div>
-      <Uploads></Uploads>
+      <RandomCall></RandomCall>
+      <RandomVideoCall></RandomVideoCall>
     </div>
   );
 }
